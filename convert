@@ -1,0 +1,13 @@
+#! /bin/sh
+set -e -u
+
+DIR="$1"
+shift
+
+if [ -e "$DIR" ]; then
+	echo "$DIR exists"
+	exit 1
+fi
+
+git init "$DIR"
+time -l "${BUILDDIR:-"build/${CFG:-"default"}"}/${PROG:-"cvscvt"}" "$@" | (cd "$DIR"; git fast-import)
