@@ -6,6 +6,7 @@
 .Sh SYNOPSIS
 .Nm
 .Op Fl s Ar split\-threshold Ns Op Cm s Ns | Ns Cm m Ns | Ns Cm h Ns | Ns Cm d
+.Op Fl t Ar trunk\-name
 .Op Fl v
 .Ar path ...
 .Sh DESCRIPTION
@@ -35,6 +36,10 @@ If no suffix is given, the threshold is interpreted as
 .Cm seconds.
 The default is
 .Cm 300\~seconds .
+.It Fl t Ar trunk\-name
+Set the name for the trunk in the resulting dump.
+The default is
+.Cm master .
 .It Fl v
 Show more verbose progress information on stderr.
 .El

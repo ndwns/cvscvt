@@ -453,6 +453,34 @@ static bool older_filerev(FileRev const* const a, FileRev const* const b)
 	return a->date < b->date;
 }
 
+static bool between(char const min, char const c, char const max)
+{
+	return min <= c && c <= max;
+}
+
+static char const* check_trunk_name(char const* const name)
+{
+	switch (*name) {
+		case '\0': throw std::runtime_error("trunk name must not be empty");
+		case '/':  throw std::runtime_error("trunk name must not start with a slash ('/')");
+		case '-':  throw std::runtime_error("trunk name must not start with a minus ('-')");
+		default:   break;
+	}
+
+	for (char const* i = name; *i != '\0'; ++i) {
+		if (*i == '/') {
+			switch (i[1]) {
+				case '\0': throw std::runtime_error("trunk name must not end with a slash ('/')");
+				case '/':  throw std::runtime_error("trunk name must not contain consecutive slashes ('//')");
+			}
+		} else if (!between('A', *i, 'Z') && !between('a', *i, 'z') && !between('0', *i, '9') && *i != '_' && *i != '+' && *i != '-' && *i != '.') {
+			throw std::runtime_error("trunk name may only contain letters, digits, underscore, plus, minus and period");
+		}
+	}
+
+	return name;
+}
+
 static bool is_executable(FILE* const f)
 {
 	struct stat stat_buf;
@@ -465,9 +493,10 @@ static bool is_executable(FILE* const f)
 int main(int argc, char** argv)
 try
 {
-	u4 split_threshold = 5 * 60;
+	u4          split_threshold = 5 * 60;
+	char const* trunk_name      = "master";
 	for (;;) {
-		switch (getopt(argc, argv, "s:v")) {
+		switch (getopt(argc, argv, "s:t:v")) {
 			case -1: goto done_opt;
 
 			case 's': {
@@ -493,6 +522,8 @@ try
 				}
 				break;
 			}
+
+			case 't': trunk_name = check_trunk_name(optarg); break;
 
 			case 'v': verbose = true; break;
 
@@ -751,7 +782,7 @@ done_opt:
 #ifdef DEBUG_EXPORT
 			cout << "# " << c.oldest << '\n';
 #endif
-			cout << "commit refs/heads/trunk\n";
+			cout << "commit refs/heads/" << trunk_name << '\n';
 			cout << "committer " << *c.author << " <" << *c.author << "@invalid> " << c.oldest.seconds() - date1970 << " +0000\n";
 			cout << "data " << c.log->size << '\n';
 			cout << *c.log << '\n';
