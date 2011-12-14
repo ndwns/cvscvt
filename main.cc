@@ -171,9 +171,10 @@ struct FileRev;
 
 struct File
 {
-	File(char const* const name, Directory const* const dir) :
+	File(char const* const name, Directory const* const dir, bool const executable) :
 		name(strdup(name)),
 		dir(dir),
+		executable(executable),
 		head()
 	{}
 
@@ -181,6 +182,7 @@ struct File
 
 	char*            const name;
 	Directory const* const dir;
+	bool             const executable;
 	FileRev*               head;
 };
 
@@ -287,10 +289,8 @@ static std::ostream& print_read_status()
 	return cerr << CLEAR << n_files << " files, " << file_revs << " file revisions, " << on_trunk << " on trunk, " << changesets.size() << " changesets";
 }
 
-static void read_file(char const* const filename, File* const file)
+static void read_file(FILE* const f, File* const file)
 {
-	FILE* const f = fopen(filename, "rb");
-	if (!f) throw std::runtime_error("open failed");
 	Lexer l(f);
 
 	Set<FileRev*> revs;
@@ -427,8 +427,6 @@ static void read_file(char const* const filename, File* const file)
 	}
 
 	l.expect(T_EOF);
-
-	fclose(f);
 }
 
 #ifdef __APPLE__
@@ -453,6 +451,15 @@ static bool older_filerev(FileRev const* const a, FileRev const* const b)
 		return *a->rev < *b->rev;
 	}
 	return a->date < b->date;
+}
+
+static bool is_executable(FILE* const f)
+{
+	struct stat stat_buf;
+	if (fstat(fileno(f), &stat_buf) != 0) {
+		std::runtime_error("fstat failed");
+	}
+	return stat_buf.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH);
 }
 
 int main(int argc, char** argv)
@@ -547,14 +554,18 @@ done_opt:
 				if (ent->fts_namelen < 2) continue;
 				if (strcmp(ent->fts_name + ent->fts_namelen - 2, ",v") != 0) continue;
 
+				FILE* const file = fopen(ent->fts_accpath, "rb");
+				if (!file) throw std::runtime_error("open failed");
+
 				char* const suffix = &ent->fts_name[ent->fts_namelen - 2];
 				*suffix = '\0';
 				if (verbose) cerr << indent << ent->fts_name << endl;
-				File* const f = new File(ent->fts_name, curdir);
+				File* const f = new File(ent->fts_name, curdir, is_executable(file));
 				*suffix = ',';
 
 				++n_files;
-				read_file(ent->fts_accpath, f);
+				read_file(file, f);
+				fclose(file);
 
 				PieceTable p(*f->head->text);
 				for (FileRev* i = f->head; i; i = i->pred) {
@@ -745,11 +756,13 @@ done_opt:
 			cout << "data " << c.log->size << '\n';
 			cout << *c.log << '\n';
 			for (Vector<FileRev*>::const_iterator i = c.filerevs.begin(), end = c.filerevs.end(); i != end; ++i) {
-				FileRev const& f = **i;
-				if (f.state == dead) {
-					cout << "D " << *f.file << '\n';
+				FileRev const& r = **i;
+				File    const& f = *r.file;
+				if (r.state == dead) {
+					cout << "D " << f << '\n';
 				} else {
-					cout << "M 100644 :" << f.mark << ' ' << *f.file << '\n';
+					char const* const mode = f.executable ? "100755" : "100644";
+					cout << "M " << mode << " :" << r.mark << ' ' << f << '\n';
 				}
 			}
 
