@@ -431,7 +431,13 @@ static void read_file(char const* const filename, File* const file)
 	fclose(f);
 }
 
-static int compar(FTSENT const* const* const a, FTSENT const* const* const b)
+#ifdef __APPLE__
+typedef FTSENT const**       FTSENT_cmp;
+#else
+typedef FTSENT const* const* FTSENT_cmp;
+#endif
+
+static int compar(FTSENT_cmp const a, FTSENT_cmp const b)
 {
 	return strcmp((*a)->fts_name, (*b)->fts_name);
 }
@@ -519,7 +525,7 @@ done_opt:
 
 	Indent           indent;
 	Directory const* curdir = 0;
-	while (FTSENT const* const ent = fts_read(fts)) {
+	while (FTSENT* const ent = fts_read(fts)) {
 		switch (ent->fts_info) {
 			case FTS_D: {
 				if (ent->fts_name[0] == '\0')            continue;
