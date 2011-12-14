@@ -493,11 +493,14 @@ static bool is_executable(FILE* const f)
 int main(int argc, char** argv)
 try
 {
+	char const* email_domain    = "invalid";
 	u4          split_threshold = 5 * 60;
 	char const* trunk_name      = "master";
 	for (;;) {
-		switch (getopt(argc, argv, "s:t:v")) {
+		switch (getopt(argc, argv, "e:s:t:v")) {
 			case -1: goto done_opt;
+
+			case 'e': email_domain = optarg; break;
 
 			case 's': {
 				char* end;
@@ -783,7 +786,7 @@ done_opt:
 			cout << "# " << c.oldest << '\n';
 #endif
 			cout << "commit refs/heads/" << trunk_name << '\n';
-			cout << "committer " << *c.author << " <" << *c.author << "@invalid> " << c.oldest.seconds() - date1970 << " +0000\n";
+			cout << "committer " << *c.author << " <" << *c.author << "@" << email_domain << "> " << c.oldest.seconds() - date1970 << " +0000\n";
 			cout << "data " << c.log->size << '\n';
 			cout << *c.log << '\n';
 			for (Vector<FileRev*>::const_iterator i = c.filerevs.begin(), end = c.filerevs.end(); i != end; ++i) {

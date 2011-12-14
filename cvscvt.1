@@ -5,6 +5,7 @@
 .Nd CVS/RCS to git converter
 .Sh SYNOPSIS
 .Nm
+.Op Fl e Ar email\-domain
 .Op Fl s Ar split\-threshold Ns Op Cm s Ns | Ns Cm m Ns | Ns Cm h Ns | Ns Cm d
 .Op Fl t Ar trunk\-name
 .Op Fl v
@@ -23,6 +24,10 @@ It is also allowed to specify single
 files.
 .Sh OPTIONS
 .Bl -tag
+.It Fl e Ar email\-domain
+Set the email\-domain of the authors and committers.
+The default is
+.Cm invalid .
 .It Fl s Ar split\-threshold Ns Op Cm s Ns | Ns Cm m Ns | Ns Cm h Ns | Ns Cm d
 If a potential change set contains a gap longer than this threshold between two consecutive time stamps, then the change set is split at this point.
 An optional suffix for
