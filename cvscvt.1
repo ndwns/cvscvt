@@ -1,0 +1,65 @@
+.Dd December 14, 2011
+.Dt CVSCVT 1
+.Sh NAME
+.Nm cvscvt
+.Nd CVS/RCS to git converter
+.Sh SYNOPSIS
+.Nm
+.Op Fl s Ar split\-threshold Ns Op Cm s Ns | Ns Cm m Ns | Ns Cm h Ns | Ns Cm d
+.Op Fl v
+.Ar path ...
+.Sh DESCRIPTION
+.Nm
+reads in a set of directory trees containing RCS files (suffix
+.Cm ,v )
+and converts them to a git fast\-import dump.
+File revisions are grouped to change sets by author and commit log.
+.Pp
+Any number of paths may be given, which will be placed at the root of the resulting tree.
+If a path ends in a slash, its contents will be placed at the root, otherwise this directory will be placed at the root.
+It is also allowed to specify single
+.Cm ,v
+files.
+.Sh OPTIONS
+.Bl -tag
+.It Fl s Ar split\-threshold Ns Op Cm s Ns | Ns Cm m Ns | Ns Cm h Ns | Ns Cm d
+If a potential change set contains a gap longer than this threshold between two consecutive time stamps, then the change set is split at this point.
+An optional suffix for
+.Cm s Ns econds ,
+.Cm m Ns inutes ,
+.Cm h Ns ours
+or
+.Cm d Ns ays
+may be appended.
+If no suffix is given, the threshold is interpreted as
+.Cm seconds.
+The default is
+.Cm 300\~seconds .
+.It Fl v
+Show more verbose progress information on stderr.
+.El
+.Sh EXAMPLES
+.D1 git init repo.git
+.D1 cvscvt repo.cvs/ | (cd repo.git && git fast\-import)
+Import a CVS repository rooted at
+.Cm repo.cvs/
+into a new git repository rooted at
+.Cm repo.git .
+The trailing slash is important, so the files in
+.Cm repo.cvs/
+are placed at the root of the resulting repository.
+Otherwise the resulting repository would have one directory
+.Cm repo.cvs
+at its root.
+.Sh SEE ALSO
+.Xr cvs 1 ,
+.Xr git\-fast\-import 1 ,
+.Xr rcs 1
+.Sh AUTHORS
+.Nm
+was written by
+.An Christoph Mallon
+.Aq christoph.mallon@gmx.de .
+.Sh BUGS
+No branches or tags are converted, only trunk.
+This is work in progress.
