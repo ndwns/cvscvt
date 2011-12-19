@@ -2,9 +2,10 @@
 
 #include "piecetable.h"
 
-PieceTable::PieceTable(Blob const& b) :
-	size_(b.size)
+void PieceTable::set(Blob const& b)
 {
+	size_ = b.size;
+
 	u1 const* data = b.data;
 	size_t    size = 0;
 	for (u1 const* i = data, * const end = data + b.size; i != end; ++i) {
@@ -20,7 +21,7 @@ PieceTable::PieceTable(Blob const& b) :
 	}
 }
 
-void PieceTable::modify(Blob const& b)
+void PieceTable::modify(PieceTable const& src, Blob const& b)
 {
 	Vector<Piece> p;
 	size_t line  = 0; // Copied till this line
@@ -40,8 +41,8 @@ void PieceTable::modify(Blob const& b)
 
 		if (cmd == 'd') --l;
 
-		if (l < line)           goto invalid;
-		if (pieces_.size() < l) goto invalid;
+		if (l < line)               goto invalid;
+		if (src.pieces_.size() < l) goto invalid;
 
 		if (i == end || *i++ != ' ') goto invalid;
 
@@ -60,7 +61,7 @@ void PieceTable::modify(Blob const& b)
 		if (i == end || *i++ != '\n') goto invalid;
 
 		while (line != l) {
-			Piece const& piece = pieces_[line++];
+			Piece const& piece = src.pieces_[line++];
 			total += piece.size;
 			p.push_back(piece);
 		}
@@ -86,15 +87,15 @@ void PieceTable::modify(Blob const& b)
 				}
 			}
 		} else if (cmd == 'd') {
-			if (pieces_.size() - line < n) goto invalid;
+			if (src.pieces_.size() - line < n) goto invalid;
 			line += n;
 		} else {
 			goto invalid;
 		}
 	}
 
-	while (line != pieces_.size()) {
-		Piece const& piece = pieces_[line++];
+	while (line != src.pieces_.size()) {
+		Piece const& piece = src.pieces_[line++];
 		total += piece.size;
 		p.push_back(piece);
 	}

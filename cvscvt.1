@@ -1,11 +1,12 @@
-.Dd December 14, 2011
+.Dd December 19, 2011
 .Dt CVSCVT 1
 .Sh NAME
 .Nm cvscvt
-.Nd CVS/RCS to git converter
+.Nd CVS/RCS to git and svn converter
 .Sh SYNOPSIS
 .Nm
 .Op Fl e Ar email\-domain
+.Op Fl f Cm git | Cm svn
 .Op Fl s Ar split\-threshold Ns Op Cm s Ns | Ns Cm m Ns | Ns Cm h Ns | Ns Cm d
 .Op Fl t Ar trunk\-name
 .Op Fl v
@@ -14,7 +15,7 @@
 .Nm
 reads in a set of directory trees containing RCS files (suffix
 .Cm ,v )
-and converts them to a git fast\-import dump.
+and converts them to a git fast\-import or svn dump.
 File revisions are grouped to change sets by author and commit log.
 .Pp
 Any number of paths may be given, which will be placed at the root of the resulting tree.
@@ -26,8 +27,13 @@ files.
 .Bl -tag
 .It Fl e Ar email\-domain
 Set the email\-domain of the authors and committers.
+This option is only valid for git output.
 The default is
 .Cm invalid .
+.It Fl f Cm git | Cm svn
+Select the dump output format.
+The default is
+.Cm git .
 .It Fl s Ar split\-threshold Ns Op Cm s Ns | Ns Cm m Ns | Ns Cm h Ns | Ns Cm d
 If a potential change set contains a gap longer than this threshold between two consecutive time stamps, then the change set is split at this point.
 An optional suffix for
@@ -44,7 +50,10 @@ The default is
 .It Fl t Ar trunk\-name
 Set the name for the trunk in the resulting dump.
 The default is
-.Cm master .
+.Cm master
+for git and
+.Cm trunk
+for svn.
 .It Fl v
 Show more verbose progress information on stderr.
 .El
@@ -61,10 +70,15 @@ are placed at the root of the resulting repository.
 Otherwise the resulting repository would have one directory
 .Cm repo.cvs
 at its root.
+.Pp
+.D1 svnadmin create repo.svn
+.D1 cvscvt -f svn repo.cvs/ | svnadmin load repo.svn
+This is the same as above except for the target being a svn repository.
 .Sh SEE ALSO
 .Xr cvs 1 ,
 .Xr git\-fast\-import 1 ,
-.Xr rcs 1
+.Xr rcs 1 ,
+.Xr svnadmin 1
 .Sh AUTHORS
 .Nm
 was written by

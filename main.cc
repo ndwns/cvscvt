@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <iomanip>
 #include <iostream>
 #include <stdexcept>
 #include <unistd.h>
@@ -28,6 +29,14 @@
 using std::cerr;
 using std::cout;
 using std::endl;
+
+enum OutputFormat
+{
+	OUT_GIT,
+	OUT_SVN
+};
+
+static OutputFormat output_format = OUT_GIT;
 
 namespace Sym
 {
@@ -150,13 +159,15 @@ static std::ostream& operator <<(std::ostream& o, RevNum const& r)
 
 struct Directory
 {
-	Directory(char const* const name, Directory const* const parent) :
+	Directory(char const* const name, Directory* const parent) :
 		name(strdup(name)),
-		parent(parent)
+		parent(parent),
+		n_entries(0)
 	{}
 
-	char*            name;
-	Directory const* parent;
+	char*      name;
+	Directory* parent;
+	size_t     n_entries;
 };
 
 static std::ostream& operator <<(std::ostream& o, Directory const& d)
@@ -171,7 +182,7 @@ struct FileRev;
 
 struct File
 {
-	File(char const* const name, Directory const* const dir, bool const executable) :
+	File(char const* const name, Directory* const dir, bool const executable) :
 		name(strdup(name)),
 		dir(dir),
 		executable(executable),
@@ -180,10 +191,10 @@ struct File
 
 	u4 hash() const { return (uintptr_t)this >> 4; }
 
-	char*            const name;
-	Directory const* const dir;
-	bool             const executable;
-	FileRev*               head;
+	char*      const name;
+	Directory* const dir;
+	bool       const executable;
+	FileRev*         head;
 };
 
 static std::ostream& operator <<(std::ostream& o, File const& f)
@@ -228,6 +239,7 @@ struct FileRev
 	FileRev*      pred;
 	Changeset*    changeset;
 	u4            mark;
+	PieceTable    content;
 };
 
 static inline bool operator ==(FileRev const& a, FileRev const& b)
@@ -278,7 +290,8 @@ static inline bool operator ==(Changeset const& a, Changeset const& b)
 	return a.log == b.log && a.author == b.author;
 }
 
-static bool            verbose = false;
+static char const*     trunk_name = 0;
+static bool            verbose    = false;
 static Set<Changeset*> changesets;
 static size_t          file_revs;
 static size_t          on_trunk;
@@ -490,17 +503,58 @@ static bool is_executable(FILE* const f)
 	return stat_buf.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH);
 }
 
+static size_t log2(size_t const v)
+{
+	return
+		v <         10 ? 1 :
+		v <        100 ? 2 :
+		v <       1000 ? 3 :
+		v <      10000 ? 4 :
+		v <     100000 ? 5 :
+		v <    1000000 ? 6 :
+		v <   10000000 ? 7 :
+		v <  100000000 ? 8 :
+		v < 1000000000 ? 9 :
+		10;
+}
+
+static void add_dir_entry(Directory* const d)
+{
+	if (d && d->n_entries++ == 0) {
+		add_dir_entry(d->parent);
+		cout << "Node-path: " << trunk_name << '/' << *d << "\nNode-kind: dir\nNode-action: add\n\n";
+	}
+}
+
+static void del_dir_entry(Directory* const d)
+{
+	if (d && --d->n_entries == 0) {
+		cout << "Node-path: " << trunk_name << '/' << *d << "\nNode-kind: dir\nNode-action: delete\n\n";
+		del_dir_entry(d->parent);
+	}
+}
+
 int main(int argc, char** argv)
 try
 {
-	char const* email_domain    = "invalid";
+	char const* email_domain    = 0;
 	u4          split_threshold = 5 * 60;
-	char const* trunk_name      = "master";
 	for (;;) {
-		switch (getopt(argc, argv, "e:s:t:v")) {
+		switch (getopt(argc, argv, "e:f:s:t:v")) {
 			case -1: goto done_opt;
 
 			case 'e': email_domain = optarg; break;
+
+			case 'f':
+				if (strcmp(optarg, "git") == 0) {
+					output_format = OUT_GIT;
+				} else if (strcmp(optarg, "svn") == 0) {
+					output_format = OUT_SVN;
+				} else {
+					cerr << "error: unknown output format '" << optarg << "'\n";
+					return EXIT_FAILURE;
+				}
+				break;
 
 			case 's': {
 				char* end;
@@ -538,6 +592,21 @@ done_opt:
 	argc -= optind;
 	argv += optind;
 
+	switch (output_format) {
+		case OUT_GIT:
+			if (!email_domain) email_domain = "invalid";
+			if (!trunk_name)   trunk_name   = "master";
+			break;
+
+		case OUT_SVN:
+			if (email_domain) {
+				cerr << "error: -e is not valid for svn output\n";
+				return EXIT_FAILURE;
+			}
+			if (!trunk_name) trunk_name = "trunk";
+			break;
+	}
+
 	if (argc == 0) return EXIT_FAILURE;
 
 	Sym::access   = Lexer::add_keyword("access");
@@ -564,8 +633,8 @@ done_opt:
 
 	u4 mark = 0;
 
-	Indent           indent;
-	Directory const* curdir = 0;
+	Indent     indent;
+	Directory* curdir = 0;
 	while (FTSENT* const ent = fts_read(fts)) {
 		switch (ent->fts_info) {
 			case FTS_D: {
@@ -601,20 +670,35 @@ done_opt:
 				read_file(file, f);
 				fclose(file);
 
-				PieceTable p(*f->head->text);
-				for (FileRev* i = f->head; i; i = i->pred) {
-					if (i != f->head) {
-						p.modify(*i->text);
-					}
-					if (i->state != dead) {
-						i->mark = ++mark;
+				FileRev* r = f->head;
+				switch (output_format) {
+					case OUT_GIT: {
+						PieceTable p(*r->text);
+						for (;;) {
+							if (r->state != dead) {
+								r->mark = ++mark;
 #ifdef DEBUG_EXPORT
-						cout << "# " << *f << ' ' << *i->rev << '\n';
+								cout << "# " << *f << ' ' << *r->rev << '\n';
 #endif
-						cout << "blob\n";
-						cout << "mark :" << mark << '\n';
-						cout << "data " << p.size() << '\n';
-						cout << p << '\n';
+								cout << "blob\n";
+								cout << "mark :" << mark << '\n';
+								cout << "data " << p.size() << '\n';
+								cout << p << '\n';
+							}
+							if (!(r = r->pred)) break;
+							p.modify(p, *r->text);
+						}
+						break;
+					}
+
+					case OUT_SVN: {
+						r->content.set(*r->text);
+						for (;;) {
+							PieceTable const& c = r->content;
+							if (!(r = r->pred)) break;
+							r->content.modify(c, *r->text);
+						}
+						break;
 					}
 				}
 				break;
@@ -775,6 +859,33 @@ done_opt:
 
 	{ cerr << "emitting changesets...\n";
 
+		using std::setw;
+
+		if (output_format == OUT_SVN) {
+			cout << "SVN-fs-dump-format-version: 2\n\n";
+
+			Date const& d = (*sorted.begin())->oldest;
+			cout <<
+				"Revision-number: 1\n"
+				"Prop-content-length: 125\n"
+				"Content-length: 125\n"
+				"\n"
+				"K 8\nsvn:date\nV 27\n" << std::setfill('0')
+					<< setw(4) << (u4)d.year   << '-'
+					<< setw(2) << (u4)d.month  << '-'
+					<< setw(2) << (u4)d.day    << 'T'
+					<< setw(2) << (u4)d.hour   << ':'
+					<< setw(2) << (u4)d.minute << ':'
+					<< setw(2) << (u4)d.second << ".000000Z\n"
+				"K 7\nsvn:log\nV 51\nStandard project directories initialized by cvscvt.\n"
+				"PROPS-END\n"
+				"\n"
+				"Node-path: " << trunk_name << "\n"
+				"Node-kind: dir\n"
+				"Node-action: add\n"
+				"\n";
+		}
+
 		u4 const date1970 = Date(1970, 1, 1, 0, 0, 0).seconds();
 		size_t n = 0;
 
@@ -782,21 +893,101 @@ done_opt:
 		Vector<Changeset const*>::const_iterator const end   = sorted.end();
 		for (Vector<Changeset const*>::const_iterator i = end; i != begin;) {
 			Changeset const& c = **--i;
+			switch (output_format) {
+				case OUT_GIT: {
 #ifdef DEBUG_EXPORT
-			cout << "# " << c.oldest << '\n';
+					cout << "# " << c.oldest << '\n';
 #endif
-			cout << "commit refs/heads/" << trunk_name << '\n';
-			cout << "committer " << *c.author << " <" << *c.author << "@" << email_domain << "> " << c.oldest.seconds() - date1970 << " +0000\n";
-			cout << "data " << c.log->size << '\n';
-			cout << *c.log << '\n';
-			for (Vector<FileRev*>::const_iterator i = c.filerevs.begin(), end = c.filerevs.end(); i != end; ++i) {
-				FileRev const& r = **i;
-				File    const& f = *r.file;
-				if (r.state == dead) {
-					cout << "D " << f << '\n';
-				} else {
-					char const* const mode = f.executable ? "100755" : "100644";
-					cout << "M " << mode << " :" << r.mark << ' ' << f << '\n';
+					cout << "commit refs/heads/" << trunk_name << '\n';
+					cout << "committer " << *c.author << " <" << *c.author << "@" << email_domain << "> " << c.oldest.seconds() - date1970 << " +0000\n";
+					cout << "data " << c.log->size << '\n';
+					cout << *c.log << '\n';
+					for (Vector<FileRev*>::const_iterator i = c.filerevs.begin(), end = c.filerevs.end(); i != end; ++i) {
+						FileRev const& r = **i;
+						File    const& f = *r.file;
+						if (r.state == dead) {
+							cout << "D " << f << '\n';
+						} else {
+							char const* const mode = f.executable ? "100755" : "100644";
+							cout << "M " << mode << " :" << r.mark << ' ' << f << '\n';
+						}
+					}
+					break;
+				}
+
+				case OUT_SVN: {
+					cout << "Revision-number: " << (n + 2) << '\n';
+
+					Blob   const& a        = *c.author;
+					Date   const& d        = c.oldest;
+					Blob   const& l        = *c.log;
+					size_t const  prop_len =
+						5 + 11 + 2 + log2(a.size) + 1 + a.size + 1 + // svn:author
+						4 +  9 + 5 + 28 +                            // svn:date
+						4 +  7 + 2 + log2(l.size) + 1 + l.size + 1 + // svn:log
+						11;                                          // PROPS-END
+
+					cout << "Prop-content-length: " << prop_len << '\n';
+					cout << "Content-length: "      << prop_len << "\n\n";
+					cout << "K 10\nsvn:author\nV "  << a.size << '\n' << a << '\n';
+					cout << "K 8\nsvn:date\nV 27\n" << std::setfill('0')
+						<< setw(4) << (u4)d.year   << '-'
+						<< setw(2) << (u4)d.month  << '-'
+						<< setw(2) << (u4)d.day    << 'T'
+						<< setw(2) << (u4)d.hour   << ':'
+						<< setw(2) << (u4)d.minute << ':'
+						<< setw(2) << (u4)d.second << ".000000Z\n";
+					cout << "K 7\nsvn:log\nV " << l.size << '\n' << l << '\n';
+					cout << "PROPS-END\n";
+
+					for (Vector<FileRev*>::const_iterator i = c.filerevs.begin(), end = c.filerevs.end(); i != end; ++i) {
+						FileRev const& r         = **i;
+						File    const& f         = *r.file;
+						bool    const  cur_dead  = r.state == dead;
+						bool    const  pred_dead = !r.pred || r.pred->state == dead;
+
+						if (pred_dead && !cur_dead) {
+							add_dir_entry(f.dir);
+						}
+
+						if (!cur_dead) {
+							cout << "Node-path: " << trunk_name << '/' << f << "\nNode-kind: file\n";
+							if (pred_dead) {
+								cout << "Node-action: add\n";
+							} else {
+								cout << "Node-action: change\n";
+							}
+
+							size_t const text_len = r.content.size();
+							size_t       prop_len = 0;
+
+							bool const x = f.executable;
+							if (x) prop_len += 26;
+
+							if (prop_len != 0) {
+								prop_len += 10; // PROPS-END
+								cout << "Prop-content-length: " << prop_len << '\n';
+							}
+							cout << "Text-content-length: " << text_len            << '\n';
+							cout << "Content-length: "      << prop_len + text_len << "\n\n";
+
+							if (prop_len != 0) {
+								if (x) {
+									cout << "K 14\nsvn:executable\nV 1\n*\n";
+								}
+
+								cout << "PROPS-END\n";
+							}
+
+							cout << r.content;
+						} else if (!pred_dead) {
+							cout << "Node-path: " << trunk_name << '/' << f << "\nNode-action: delete\n\n";
+							del_dir_entry(f.dir);
+						}
+					}
+
+					cout << '\n';
+					break;
 				}
 			}
 

@@ -9,9 +9,13 @@
 class PieceTable
 {
 public:
-	PieceTable(Blob const&);
+	PieceTable() : size_(0) {}
 
-	void modify(Blob const& b);
+	PieceTable(Blob const& b) { set(b); }
+
+	void set(Blob const&);
+
+	void modify(PieceTable const&, Blob const&);
 
 	size_t size() const { return size_; }
 
