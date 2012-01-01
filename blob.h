@@ -44,6 +44,12 @@ struct Blob
 		return hash;
 	}
 
+	bool empty() const { return size == 0; }
+
+	u1 const* begin() const { return data; }
+
+	u1 const* end() const { return data + size; }
+
 private:
 	Blob() : size(0) {}
 
@@ -67,5 +73,38 @@ static inline std::ostream& operator <<(std::ostream& o, Blob const& b)
 {
 	return o.write(reinterpret_cast<char const*>(b.data), b.size);
 }
+
+class BlobBuilder
+{
+public:
+	BlobBuilder() : capacity_(16), blob_(Blob::alloc(capacity_)) {}
+
+	~BlobBuilder() { delete blob_; }
+
+	void add_byte(u1 const c)
+	{
+		if (blob_->size == capacity_) {
+			size_t const cap = capacity_;
+			Blob*  const b   = Blob::alloc(*blob_, cap * 2);
+			delete blob_;
+			capacity_ = cap * 2;
+			blob_     = b;
+		}
+		blob_->append(c);
+	}
+
+	bool empty() const { return blob_->empty(); }
+
+	Blob* get()
+	{
+		Blob* const b = blob_;
+		blob_ = 0;
+		return b;
+	}
+
+private:
+	size_t capacity_;
+	Blob*  blob_;
+};
 
 #endif
