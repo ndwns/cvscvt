@@ -50,7 +50,7 @@ private:
 	u4        line_;
 	u4        col_;
 	u4        colstart_;
-	Blob*     blob_;
+	Symbol    blob_;
 };
 
 #endif

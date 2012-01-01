@@ -9,7 +9,18 @@ Lexer::Lexer(FILE* const f) : f_(f), line_(1), col_(0)
 	next();
 }
 
-static Set<Blob*> texts;
+struct LexerBlobs : public Set<Blob*>
+{
+	LexerBlobs() :
+		sym_colon(    insert(Blob::alloc(":"))),
+		sym_semicolon(insert(Blob::alloc(";")))
+	{}
+
+	Symbol sym_colon;
+	Symbol sym_semicolon;
+};
+
+static LexerBlobs texts;
 
 static Blob* hash_find(Blob* const b)
 {
@@ -69,8 +80,8 @@ void Lexer::next()
 			case '$': return T_DOLLAR;
 			case ',': return T_COMMA;
 #endif
-			case ':': kind_ = T_COLON;     return;
-			case ';': kind_ = T_SEMICOLON; return;
+			case ':': kind_ = T_COLON;     blob_ = texts.sym_colon;     return;
+			case ';': kind_ = T_SEMICOLON; blob_ = texts.sym_semicolon; return;
 
 			case '@': {
 				BlobBuilder b;
