@@ -779,8 +779,6 @@ done_opt:
 
 	std::sort(sets.begin(), sets.end(), older_changeset);
 
-	cerr << "splitting...\n";
-
 	Vector<Changeset*> splitsets;
 	size_t k = 0;
 	for (Vector<Changeset*>::const_iterator i = sets.begin(), end = sets.end(); i != end; ++i) {
@@ -844,11 +842,11 @@ done_opt:
 			splitsets.push_back(c);
 		}
 
-		if (++k % 100 == 0) {
-			cerr << CLEAR << k << " -> " << splitsets.size();
+		if (++k % 1000 == 0) {
+			cerr << CLEAR "splitting... " << k << " -> " << splitsets.size();
 		}
 	}
-	cerr << CLEAR << k << " -> " << splitsets.size() << '\n';
+	cerr << CLEAR "splitting... " << k << " -> " << splitsets.size() << '\n';
 
 	Vector<Changeset*>::const_iterator const begin = splitsets.begin();
 	Vector<Changeset*>::const_iterator const end   = splitsets.end();
@@ -871,7 +869,7 @@ done_opt:
 
 	Vector<Changeset const*> sorted;
 
-	{ cerr << "sorting...\n";
+	{
 #if DEBUG_SPLIT
 		cerr << "\nsorted:\n";
 #endif
@@ -895,9 +893,11 @@ done_opt:
 				roots.push(predc);
 			}
 
-			if (++n % 100 == 0) cerr << CLEAR << n;
+			if (++n % 1000 == 0) {
+				cerr << CLEAR "sorting... " << n;
+			}
 		}
-		cerr << CLEAR << n << '\n';
+		cerr << CLEAR "sorting... " << n << '\n';
 	}
 
 #if DEBUG_SPLIT
@@ -922,8 +922,7 @@ done_opt:
 	}
 #endif
 
-	{ cerr << "emitting changesets...\n";
-
+	{
 		using std::setw;
 
 		if (output_format == OUT_SVN) {
@@ -952,7 +951,7 @@ done_opt:
 		}
 
 		u4 const date1970 = Date(1970, 1, 1, 0, 0, 0).seconds();
-		size_t n = 0;
+		size_t n_commits = 0;
 
 		Vector<Changeset const*>::const_iterator const begin = sorted.begin();
 		Vector<Changeset const*>::const_iterator const end   = sorted.end();
@@ -981,7 +980,7 @@ done_opt:
 				}
 
 				case OUT_SVN: {
-					cout << "Revision-number: " << (n + 2) << '\n';
+					cout << "Revision-number: " << (n_commits + 2) << '\n';
 
 					Blob   const& a        = *c.author;
 					Date   const& d        = c.oldest;
@@ -1056,9 +1055,9 @@ done_opt:
 				}
 			}
 
-			if (++n % 100 == 0) cerr << CLEAR << n << ' ' << c.oldest;
+			if (++n_commits % 100 == 0) cerr << CLEAR "emitting changesets... " << n_commits << ' ' << c.oldest;
 		}
-		cerr << CLEAR << n << '\n';
+		cerr << CLEAR "emitting changesets... " << n_commits << '\n';
 	}
 
 	fts_close(fts);
