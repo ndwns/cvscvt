@@ -715,8 +715,12 @@ done_opt:
 				break;
 
 			case FTS_F: {
-				if (ent->fts_namelen < 2) continue;
-				if (!streq(ent->fts_name + ent->fts_namelen - 2, ",v")) continue;
+				if (ent->fts_namelen < 2 || !streq(ent->fts_name + ent->fts_namelen - 2, ",v")) {
+					cerr << CLEAR "warning: encountered non-RCS file ";
+					if (curdir) cerr << *curdir;
+					cerr << ent->fts_name << '\n';
+					continue;
+				}
 
 				FILE* const file = fopen(ent->fts_accpath, "rb");
 				if (!file) throw std::runtime_error("open failed");
