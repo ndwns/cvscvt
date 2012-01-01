@@ -246,6 +246,7 @@ struct FileRev
 		log(),
 		text(),
 		pred(),
+		next(),
 		changeset(),
 		mark()
 	{}
@@ -260,6 +261,7 @@ struct FileRev
 	Symbol        log;
 	Symbol        text;
 	FileRev*      pred;
+	FileRev*      next; // The next file revision on the same branch
 	Changeset*    changeset;
 	u4            mark;
 	PieceTable    content;
@@ -446,8 +448,15 @@ static void read_file(FILE* const f, File* const file)
 			++on_trunk;
 			FileRev* const filerev = revs.insert(new FileRev(file, rev));
 			if (snext) {
-				RevNum const* const pred = RevNum::parse(snext);
-				filerev->pred = revs.insert(new FileRev(file, pred));
+				RevNum  const* const pred = RevNum::parse(snext);
+				FileRev*       const prev = revs.insert(new FileRev(file, pred));
+
+				if (prev->next) {
+					cerr << CLEAR "warning: both " << *prev->next->rev << " and " << *rev << " of " << *file << " have " << *pred << " as predecessor\n";
+				}
+
+				filerev->pred = prev;
+				prev->next    = filerev;
 			}
 			filerev->date   = date;
 			filerev->author = sauthor;
@@ -821,6 +830,12 @@ done_opt:
 				fclose(file);
 
 				FileRev* r = f->head;
+
+				if (FileRev const* next = f->head->next) {
+					while (next->next) next = next->next;
+					cerr << CLEAR "warning: head of " << *f << " is " << *r->rev << " but latest revision is " << *next->rev << '\n';
+				}
+
 				switch (output_format) {
 					case OUT_GIT: {
 						PieceTable p(*r->text);
