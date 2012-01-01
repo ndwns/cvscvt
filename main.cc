@@ -318,6 +318,7 @@ static Set<Changeset*> changesets;
 static size_t          file_revs;
 static size_t          on_trunk;
 static size_t          n_files;
+static bool            in_attic;
 
 static std::ostream& print_read_status()
 {
@@ -446,6 +447,15 @@ static void read_file(FILE* const f, File* const file)
 				filerev->state = STATE_EXP;
 			}
 		}
+	}
+
+	if (!file->head->author) {
+		cerr << CLEAR "error: head of " << *file << " does not exist\n";
+	} else if (in_attic && file->head->state != STATE_DEAD) {
+		cerr << CLEAR "warning: " << *file << " is in " ATTIC ", but head is not dead; treating as dead\n";
+		file->head->state = STATE_DEAD;
+	} else if (!in_attic && file->head->state == STATE_DEAD) {
+		cerr << CLEAR "warning: " << *file << " is not in " ATTIC ", but head is dead\n";
 	}
 
 	l.expect(Sym::desc);
@@ -667,8 +677,14 @@ done_opt:
 	while (FTSENT* const ent = fts_read(fts)) {
 		switch (ent->fts_info) {
 			case FTS_D: {
-				if (ent->fts_name[0] == '\0')      continue;
-				if (streq(ent->fts_name, ATTIC)) continue;
+				if (in_attic) {
+					cerr << "error: Attic at " << *curdir << " has subdirectory\n";
+				}
+				if (ent->fts_name[0] == '\0') continue;
+				if (streq(ent->fts_name, ATTIC)) {
+					in_attic = true;
+					continue;
+				}
 				if (verbose) cerr << indent << ent->fts_name << "/\n";
 				++indent;
 				curdir = new Directory(ent->fts_name, curdir);
@@ -676,8 +692,11 @@ done_opt:
 			}
 
 			case FTS_DP:
-				if (ent->fts_name[0] == '\0')      continue;
-				if (streq(ent->fts_name, ATTIC)) continue;
+				if (ent->fts_name[0] == '\0') continue;
+				if (streq(ent->fts_name, ATTIC)) {
+					in_attic = false;
+					continue;
+				}
 				--indent;
 				curdir = curdir->parent;
 				break;
