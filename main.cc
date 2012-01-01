@@ -21,6 +21,7 @@
 #include "types.h"
 #include "vector.h"
 
+#define ATTIC "Attic"
 #define CLEAR "\r\x1B[K"
 
 #ifndef DEBUG_SPLIT
@@ -640,7 +641,7 @@ done_opt:
 		switch (ent->fts_info) {
 			case FTS_D: {
 				if (ent->fts_name[0] == '\0')      continue;
-				if (streq(ent->fts_name, "Attic")) continue;
+				if (streq(ent->fts_name, ATTIC)) continue;
 				if (verbose) cerr << indent << ent->fts_name << "/\n";
 				++indent;
 				curdir = new Directory(ent->fts_name, curdir);
@@ -649,7 +650,7 @@ done_opt:
 
 			case FTS_DP:
 				if (ent->fts_name[0] == '\0')      continue;
-				if (streq(ent->fts_name, "Attic")) continue;
+				if (streq(ent->fts_name, ATTIC)) continue;
 				--indent;
 				curdir = curdir->parent;
 				break;
