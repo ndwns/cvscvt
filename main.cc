@@ -42,12 +42,14 @@ static OutputFormat output_format = OUT_GIT;
 
 namespace Sym
 {
+	static Symbol Exp;
 	static Symbol access;
 	static Symbol author;
 	static Symbol branch;
 	static Symbol branches;
 	static Symbol comment;
 	static Symbol date;
+	static Symbol dead;
 	static Symbol desc;
 	static Symbol expand;
 	static Symbol head;
@@ -212,6 +214,24 @@ static bool operator ==(File const& a, File const& b)
 	return &a == &b;
 }
 
+enum State
+{
+	STATE_DEAD,
+	STATE_EXP
+};
+
+#if DEBUG_SPLIT
+static std::ostream& operator <<(std::ostream& o, State const s)
+{
+	char const* text = "<invalid>";
+	switch (s) {
+		case STATE_DEAD: text = "dead"; break;
+		case STATE_EXP:  text = "Exp";  break;
+	}
+	return o << text;
+}
+#endif
+
 struct Changeset;
 
 struct FileRev
@@ -235,7 +255,7 @@ struct FileRev
 	RevNum const* rev;
 	Date          date;
 	Symbol        author;
-	Symbol        state;
+	State         state;
 	Symbol        log;
 	Symbol        text;
 	FileRev*      pred;
@@ -417,7 +437,14 @@ static void read_file(FILE* const f, File* const file)
 			}
 			filerev->date   = date;
 			filerev->author = sauthor;
-			filerev->state  = sstate;
+			if (sstate == Sym::dead) {
+				filerev->state = STATE_DEAD;
+			} else {
+				if (sstate != Sym::Exp) {
+					cerr << CLEAR "warning: " << *file << ' ' << *rev << " has unknown state '" << *sstate << "'; treating as 'Exp'\n";
+				}
+				filerev->state = STATE_EXP;
+			}
 		}
 	}
 
@@ -611,12 +638,14 @@ done_opt:
 
 	if (argc == 0) return EXIT_FAILURE;
 
+	Sym::Exp      = Lexer::add_keyword("Exp");
 	Sym::access   = Lexer::add_keyword("access");
 	Sym::author   = Lexer::add_keyword("author");
 	Sym::branch   = Lexer::add_keyword("branch");
 	Sym::branches = Lexer::add_keyword("branches");
 	Sym::comment  = Lexer::add_keyword("comment");
 	Sym::date     = Lexer::add_keyword("date");
+	Sym::dead     = Lexer::add_keyword("dead");
 	Sym::desc     = Lexer::add_keyword("desc");
 	Sym::expand   = Lexer::add_keyword("expand");
 	Sym::head     = Lexer::add_keyword("head");
@@ -627,8 +656,6 @@ done_opt:
 	Sym::strict   = Lexer::add_keyword("strict");
 	Sym::symbols  = Lexer::add_keyword("symbols");
 	Sym::text     = Lexer::add_keyword("text");
-
-	Symbol const dead = Lexer::add_keyword("dead");
 
 	FTS* const fts = fts_open(argv, FTS_PHYSICAL, compar);
 	if (!fts) throw std::runtime_error("fts_open failed");
@@ -677,7 +704,7 @@ done_opt:
 					case OUT_GIT: {
 						PieceTable p(*r->text);
 						for (;;) {
-							if (r->state != dead) {
+							if (r->state != STATE_DEAD) {
 								r->mark = ++mark;
 #ifdef DEBUG_EXPORT
 								cout << "# " << *f << ' ' << *r->rev << '\n';
@@ -752,7 +779,7 @@ done_opt:
 			contains.insert(f.file);
 			last = now;
 #if DEBUG_SPLIT
-			cerr << "  " << f.date << ' ' << *f.state << ' ' << *f.rev;
+			cerr << "  " << f.date << ' ' << f.state << ' ' << *f.rev;
 			if (FileRev const* pred = f.pred)
 				cerr << " <- " << *pred->rev;
 			cerr << ' ' << *f.file << endl;
@@ -907,7 +934,7 @@ done_opt:
 					for (Vector<FileRev*>::const_iterator i = c.filerevs.begin(), end = c.filerevs.end(); i != end; ++i) {
 						FileRev const& r = **i;
 						File    const& f = *r.file;
-						if (r.state == dead) {
+						if (r.state == STATE_DEAD) {
 							cout << "D " << f << '\n';
 						} else {
 							char const* const mode = f.executable ? "100755" : "100644";
@@ -945,8 +972,8 @@ done_opt:
 					for (Vector<FileRev*>::const_iterator i = c.filerevs.begin(), end = c.filerevs.end(); i != end; ++i) {
 						FileRev const& r         = **i;
 						File    const& f         = *r.file;
-						bool    const  cur_dead  = r.state == dead;
-						bool    const  pred_dead = !r.pred || r.pred->state == dead;
+						bool    const  cur_dead  = r.state == STATE_DEAD;
+						bool    const  pred_dead = !r.pred || r.pred->state == STATE_DEAD;
 
 						if (pred_dead && !cur_dead) {
 							add_dir_entry(f.dir);
