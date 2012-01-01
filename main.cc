@@ -19,6 +19,7 @@
 #include "set.h"
 #include "strutil.h"
 #include "types.h"
+#include "uptr.h"
 #include "vector.h"
 
 #define ATTIC "Attic"
@@ -586,6 +587,90 @@ static void del_dir_entry(Directory* const d)
 	}
 }
 
+static bool is_cont_byte(u1 const c)
+{
+	return 0x80 <= c && c < 0xC0;
+}
+
+static Blob* convert_log(Blob const& src)
+{
+	BlobBuilder     b;
+	u1 const*       i      = src.begin();
+	u1 const* const end    = src.end();
+	u1 const*       lstart = i;
+	u1 const*       lend   = i;
+	bool            empty  = false;
+	for (;;) {
+		if (i == end) goto end;
+		switch (*i++) {
+			case '\t':
+			case ' ':
+				break;
+
+			case '\r':
+				if (i != end && *i == '\n') ++i;
+				/* FALLTHROUGH */
+			case '\n':
+				// TODO support other encodings besides utf-8/l1 hybrid
+end:
+				if (lstart == lend) {
+					empty = true;
+				} else {
+					if (empty) {
+						empty = false;
+						if (!b.empty()) b.add_byte('\n');
+					}
+					for (u1 const* k = lstart; k != lend;) {
+						u1 const c = *k;
+						if (c < 0x80) {
+							b.add_byte(c);
+							k += 1;
+						} else if (c < 0xC2) {
+							goto convert_byte;
+						} else if (c < 0xE0) {
+							if (lend - k < 2)        goto convert_byte;
+							if (!is_cont_byte(k[1])) goto convert_byte;
+							b.add_byte(c);
+							b.add_byte(k[1]);
+							k += 2;
+						} else if (c < 0xF0) {
+							if (lend - k < 3)        goto convert_byte;
+							if (!is_cont_byte(k[1])) goto convert_byte;
+							if (!is_cont_byte(k[2])) goto convert_byte;
+							b.add_byte(c);
+							b.add_byte(k[1]);
+							b.add_byte(k[2]);
+							k += 3;
+						} else if (c < 0xF1) {
+							if (lend - k < 4)        goto convert_byte;
+							if (!is_cont_byte(k[1])) goto convert_byte;
+							if (!is_cont_byte(k[2])) goto convert_byte;
+							if (!is_cont_byte(k[3])) goto convert_byte;
+							b.add_byte(c);
+							b.add_byte(k[1]);
+							b.add_byte(k[2]);
+							b.add_byte(k[3]);
+							k += 4;
+						} else {
+convert_byte:
+							b.add_byte(0xC0 | c >> 6);
+							b.add_byte(0x80 | (c & 0x3F));
+							k += 1;
+						}
+					}
+					b.add_byte('\n');
+				}
+				if (i == end) return b.get();
+				lstart = lend = i;
+				break;
+
+			default:
+				lend = i;
+				break;
+		}
+	}
+}
+
 int main(int argc, char** argv)
 try
 {
@@ -957,6 +1042,7 @@ done_opt:
 		Vector<Changeset const*>::const_iterator const end   = sorted.end();
 		for (Vector<Changeset const*>::const_iterator i = end; i != begin;) {
 			Changeset const& c = **--i;
+			uptr<Blob> log(convert_log(*c.log));
 			switch (output_format) {
 				case OUT_GIT: {
 #ifdef DEBUG_EXPORT
@@ -964,8 +1050,8 @@ done_opt:
 #endif
 					cout << "commit refs/heads/" << trunk_name << '\n';
 					cout << "committer " << *c.author << " <" << *c.author << "@" << email_domain << "> " << c.oldest.seconds() - date1970 << " +0000\n";
-					cout << "data " << c.log->size << '\n';
-					cout << *c.log << '\n';
+					cout << "data " << log->size << '\n';
+					cout << *log << '\n';
 					for (Vector<FileRev*>::const_iterator i = c.filerevs.begin(), end = c.filerevs.end(); i != end; ++i) {
 						FileRev const& r = **i;
 						File    const& f = *r.file;
@@ -984,7 +1070,7 @@ done_opt:
 
 					Blob   const& a        = *c.author;
 					Date   const& d        = c.oldest;
-					Blob   const& l        = *c.log;
+					Blob   const& l        = *log;
 					size_t const  prop_len =
 						5 + 11 + 2 + log2(a.size) + 1 + a.size + 1 + // svn:author
 						4 +  9 + 5 + 28 +                            // svn:date
