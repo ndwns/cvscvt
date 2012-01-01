@@ -107,10 +107,15 @@ RevNum const* RevNum::parse(Symbol const s)
 		if (i == end) goto invalid;
 
 		u4 major;
+		u4 minor;
 		if ('1' <= *i && *i <= '9') {
 			major = *i++ - '0';
 			for (;;) {
-				if (i == end) goto invalid;
+				if (i == end) {
+					minor = major;
+					major = 0;
+					goto done;
+				}
 				if ('0' <= *i && *i <= '9') {
 					major = major * 10 + (*i++ - '0');
 				} else {
@@ -127,7 +132,6 @@ RevNum const* RevNum::parse(Symbol const s)
 		if (*i++ != '.') goto invalid;
 		if (i == end)    goto invalid;
 
-		u4 minor;
 		if ('1' <= *i && *i <= '9') {
 			minor = *i++ - '0';
 			for (;;) {
@@ -144,6 +148,7 @@ RevNum const* RevNum::parse(Symbol const s)
 			goto invalid;
 		}
 
+done:
 		rev = revnums.insert(new RevNum(rev, major, minor));
 		if (i == end) return rev;
 
