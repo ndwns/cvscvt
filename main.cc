@@ -325,6 +325,16 @@ static std::ostream& print_read_status()
 	return cerr << CLEAR << n_files << " files, " << file_revs << " file revisions, " << on_trunk << " on trunk, " << changesets.size() << " changesets";
 }
 
+static void accept_newphrase(Lexer& l, Symbol const stop_at = 0)
+{
+	while (Symbol const sym = l.accept(T_ID)) {
+		if (sym == stop_at) break;
+		cerr << CLEAR "warning: ignoring newphrase '" << *sym << "'\n";
+		while (l.accept(T_ID) || l.accept(T_NUM) || l.accept(T_STRING) || l.accept(T_COLON)) {}
+		l.expect(T_SEMICOLON);
+	}
+}
+
 static void read_file(FILE* const f, File* const file)
 {
 	Lexer l(f);
@@ -402,6 +412,8 @@ static void read_file(FILE* const f, File* const file)
 		l.expect(T_SEMICOLON);
 	}
 
+	accept_newphrase(l);
+
 	while (Symbol const srev = l.accept(T_NUM)) {
 		l.expect(Sym::date);
 		Symbol const sdate = l.expect(T_NUM);
@@ -458,13 +470,14 @@ static void read_file(FILE* const f, File* const file)
 		cerr << CLEAR "warning: " << *file << " is not in " ATTIC ", but head is dead\n";
 	}
 
-	l.expect(Sym::desc);
+	accept_newphrase(l, Sym::desc);
 	l.expect(T_STRING);
 
 	while (Symbol const srev = l.accept(T_NUM)) {
 		l.expect(Sym::log);
 		Symbol const slog = l.expect(T_STRING);
-		l.expect(Sym::text);
+
+		accept_newphrase(l, Sym::text);
 		Symbol const stext = l.expect(T_STRING);
 
 		RevNum const* const rev = RevNum::parse(srev);
