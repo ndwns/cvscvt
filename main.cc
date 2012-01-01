@@ -17,6 +17,7 @@
 #include "lexer.h"
 #include "piecetable.h"
 #include "set.h"
+#include "strutil.h"
 #include "types.h"
 #include "vector.h"
 
@@ -546,9 +547,9 @@ try
 			case 'e': email_domain = optarg; break;
 
 			case 'f':
-				if (strcmp(optarg, "git") == 0) {
+				if (streq(optarg, "git")) {
 					output_format = OUT_GIT;
-				} else if (strcmp(optarg, "svn") == 0) {
+				} else if (streq(optarg, "svn")) {
 					output_format = OUT_SVN;
 				} else {
 					cerr << "error: unknown output format '" << optarg << "'\n";
@@ -638,8 +639,8 @@ done_opt:
 	while (FTSENT* const ent = fts_read(fts)) {
 		switch (ent->fts_info) {
 			case FTS_D: {
-				if (ent->fts_name[0] == '\0')            continue;
-				if (strcmp(ent->fts_name, "Attic") == 0) continue;
+				if (ent->fts_name[0] == '\0')      continue;
+				if (streq(ent->fts_name, "Attic")) continue;
 				if (verbose) cerr << indent << ent->fts_name << "/\n";
 				++indent;
 				curdir = new Directory(ent->fts_name, curdir);
@@ -647,15 +648,15 @@ done_opt:
 			}
 
 			case FTS_DP:
-				if (ent->fts_name[0] == '\0')            continue;
-				if (strcmp(ent->fts_name, "Attic") == 0) continue;
+				if (ent->fts_name[0] == '\0')      continue;
+				if (streq(ent->fts_name, "Attic")) continue;
 				--indent;
 				curdir = curdir->parent;
 				break;
 
 			case FTS_F: {
 				if (ent->fts_namelen < 2) continue;
-				if (strcmp(ent->fts_name + ent->fts_namelen - 2, ",v") != 0) continue;
+				if (!streq(ent->fts_name + ent->fts_namelen - 2, ",v")) continue;
 
 				FILE* const file = fopen(ent->fts_accpath, "rb");
 				if (!file) throw std::runtime_error("open failed");
