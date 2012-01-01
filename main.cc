@@ -517,7 +517,10 @@ typedef FTSENT const* const* FTSENT_cmp;
 
 static int compar(FTSENT_cmp const a, FTSENT_cmp const b)
 {
-	return strcmp((*a)->fts_name, (*b)->fts_name);
+	return
+		streq((*a)->fts_name, ATTIC) ? -1 :
+		streq((*b)->fts_name, ATTIC) ?  1 :
+		strcmp((*a)->fts_name, (*b)->fts_name);
 }
 
 static bool older_changeset(Changeset const* const a, Changeset const* const b)
