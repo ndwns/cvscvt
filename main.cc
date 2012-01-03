@@ -524,6 +524,12 @@ static void read_file(FILE* const f, File* const file)
 		}
 	}
 
+	if (FileRev* next = file->head->next) {
+		while (next->next) next = next->next;
+		cerr << CLEAR "warning: head of " << *file << " is " << *file->head->rev << " but latest revision is " << *next->rev << "; using the latter as head\n";
+		file->head = next;
+	}
+
 	if (!file->head->author) {
 		cerr << CLEAR "error: head of " << *file << " does not exist\n";
 	} else if (in_attic && file->head->state != STATE_DEAD) {
@@ -551,6 +557,15 @@ static void read_file(FILE* const f, File* const file)
 
 			Changeset* const changeset = changesets.insert(new Changeset(slog, filerev->author));
 			changeset->add(filerev);
+		}
+	}
+
+	for (FileRev* i = file->head; i; i = i->pred) {
+		if (!i->text) {
+			cerr << CLEAR "error: " << *file << ' ' << *i->rev << " has no deltatext\n";
+		}
+		if (i->pred && i->date < i->pred->date) {
+			cerr << CLEAR "warning: timestamp of " << *file << ' ' << *i->rev << " (" << i->date << ") is older than timestamp of " << *i->pred->rev << " (" << i->pred->date << ")\n";
 		}
 	}
 
@@ -893,12 +908,6 @@ done_opt:
 				fclose(file);
 
 				FileRev* r = f->head;
-
-				if (FileRev const* next = f->head->next) {
-					while (next->next) next = next->next;
-					cerr << CLEAR "warning: head of " << *f << " is " << *r->rev << " but latest revision is " << *next->rev << '\n';
-				}
-
 				switch (output_format) {
 					case OUT_GIT: {
 						PieceTable p(*r->text);
