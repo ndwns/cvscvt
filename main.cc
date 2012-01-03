@@ -172,17 +172,20 @@ struct Directory
 	Directory() :
 		name(0),
 		parent(0),
+		depth(0),
 		n_entries(0)
 	{}
 
 	Directory(char const* const name, Directory* const parent) :
 		name(strdup(name)),
 		parent(parent),
+		depth(parent->depth + 1),
 		n_entries(0)
 	{}
 
 	char*      name;
 	Directory* parent;
+	size_t     depth;
 	size_t     n_entries;
 };
 
@@ -192,6 +195,16 @@ static std::ostream& operator <<(std::ostream& o, Directory const& d)
 		o << *d.parent;
 	}
 	return d.name ? o << d.name << '/' : o;
+}
+
+static bool operator <(Directory const& a, Directory const& b)
+{
+	assert(a.depth == b.depth);
+	if (a.parent == b.parent) {
+		return strless(a.name, b.name);
+	} else {
+		return *a.parent < *b.parent;
+	}
 }
 
 struct FileRev;
@@ -219,6 +232,35 @@ static std::ostream& operator <<(std::ostream& o, File const& f)
 		o << *f.dir;
 	}
 	return o << f.name;
+}
+
+static bool operator <(File const& a, File const& b)
+{
+	if (a.dir == b.dir) {
+		return strless(a.name, b.name);
+	} else if (a.dir->depth < b.dir->depth) {
+		Directory const* dir   = b.dir;
+		size_t    const  depth = a.dir->depth + 1;
+		while (dir->depth != depth)
+			dir = dir->parent;
+		if (a.dir == dir->parent) {
+			return strless(a.name, dir->name);
+		} else {
+			return *a.dir < *dir->parent;
+		}
+	} else if (b.dir->depth < a.dir->depth) {
+		Directory const* dir   = a.dir;
+		size_t    const  depth = b.dir->depth + 1;
+		while (dir->depth != depth)
+			dir = dir->parent;
+		if (b.dir == dir->parent) {
+			return strless(dir->name, b.name);
+		} else {
+			return *dir->parent < *b.dir;
+		}
+	} else {
+		return *a.dir < *b.dir;
+	}
 }
 
 static bool operator ==(File const& a, File const& b)
@@ -531,6 +573,12 @@ static int compar(FTSENT_cmp const a, FTSENT_cmp const b)
 
 static bool older_changeset(Changeset const* const a, Changeset const* const b)
 {
+	if (a->oldest == b->oldest) {
+		File const& fa = *a->filerevs.front()->file;
+		File const& fb = *b->filerevs.front()->file;
+		return fa < fb;
+	}
+
 	return a->oldest < b->oldest;
 }
 
@@ -538,8 +586,11 @@ static bool older_filerev(FileRev const* const a, FileRev const* const b)
 {
 	if (a->file == b->file) {
 		return *a->rev < *b->rev;
+	} else if (a->date == b->date) {
+		return *a->file < *b->file;
+	} else {
+		return a->date < b->date;
 	}
-	return a->date < b->date;
 }
 
 static bool between(char const min, char const c, char const max)
