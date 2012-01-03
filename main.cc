@@ -169,6 +169,12 @@ static std::ostream& operator <<(std::ostream& o, RevNum const& r)
 
 struct Directory
 {
+	Directory() :
+		name(0),
+		parent(0),
+		n_entries(0)
+	{}
+
 	Directory(char const* const name, Directory* const parent) :
 		name(strdup(name)),
 		parent(parent),
@@ -185,7 +191,7 @@ static std::ostream& operator <<(std::ostream& o, Directory const& d)
 	if (d.parent) {
 		o << *d.parent;
 	}
-	return o << d.name << '/';
+	return d.name ? o << d.name << '/' : o;
 }
 
 struct FileRev;
@@ -788,7 +794,7 @@ done_opt:
 	u4 mark = 0;
 
 	Indent     indent;
-	Directory* curdir = 0;
+	Directory* curdir = new Directory();
 	while (FTSENT* const ent = fts_read(fts)) {
 		switch (ent->fts_info) {
 			case FTS_D: {
@@ -818,9 +824,7 @@ done_opt:
 
 			case FTS_F: {
 				if (ent->fts_namelen < 2 || !streq(ent->fts_name + ent->fts_namelen - 2, ",v")) {
-					cerr << CLEAR "warning: encountered non-RCS file ";
-					if (curdir) cerr << *curdir;
-					cerr << ent->fts_name << '\n';
+					cerr << CLEAR "warning: encountered non-RCS file " << *curdir << ent->fts_name << '\n';
 					continue;
 				}
 
