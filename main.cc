@@ -971,18 +971,33 @@ done_opt:
 		bool need_split = false;
 		u4   last       = (*rbegin)->date.seconds();
 		for (Vector<FileRev*>::const_iterator i = rbegin; i != rend; ++i) {
-			FileRev const& f   = **i;
-			u4      const  now = f.date.seconds();
-			if (now - last > split_threshold || contains.find(f.file)) {
-				need_split = true;
+			FileRev& f   = **i;
+			u4 const now = f.date.seconds();
+			if (now - last > split_threshold) {
+				goto need_split;
+			} else if (contains.find(f.file)) {
+				if (f.pred && f.pred->changeset == f.changeset) {
+					need_split = true;
 #if DEBUG_SPLIT
-				contains.clear();
-				cerr << "--- split ---\n";
+					cerr << "vvv fixup vvv\n";
 #else
-				break;
+					break;
 #endif
+				} else {
+need_split:
+					need_split = true;
+#if DEBUG_SPLIT
+					contains.clear();
+					cerr << "--- split ---\n";
+#else
+					break;
+#endif
+					goto insert;
+				}
+			} else {
+insert:
+				contains.insert(f.file);
 			}
-			contains.insert(f.file);
 			last = now;
 #if DEBUG_SPLIT
 			cerr << "  " << f.date << ' ' << f.state << ' ' << *f.rev;
@@ -999,12 +1014,23 @@ done_opt:
 			for (Vector<FileRev*>::const_iterator i = rbegin; i != rend; ++i) {
 				FileRev& f   = **i;
 				u4 const now = f.date.seconds();
-				if (now - last > split_threshold || contains.find(f.file)) {
-					contains.clear();
-					splitsets.push_back(newset);
-					newset = new Changeset(c->log, c->author);
+				if (now - last > split_threshold) {
+					goto do_split;
+				} else if (contains.find(f.file)) {
+					if (f.pred && f.pred->changeset == newset) {
+						f.pred = f.pred->pred;
+						cerr << CLEAR "note: treating " << *f.file << ' ' << *f.rev << " as fixup commit\n";
+					} else {
+do_split:
+						contains.clear();
+						splitsets.push_back(newset);
+						newset = new Changeset(c->log, c->author);
+						goto do_insert;
+					}
+				} else {
+do_insert:
+					contains.insert(f.file);
 				}
-				contains.insert(f.file);
 				last = now;
 				newset->add(&f);
 			}
@@ -1027,6 +1053,7 @@ done_opt:
 
 		for (Vector<FileRev*>::const_iterator i = c.filerevs.begin(), end = c.filerevs.end(); i != end; ++i) {
 			FileRev const& f = **i;
+			assert(!f.pred || f.pred->changeset != f.changeset);
 			if (f.pred)
 				++f.pred->changeset->n_succ;
 		}
@@ -1141,7 +1168,10 @@ done_opt:
 					cout << *log << '\n';
 					for (Vector<FileRev*>::const_iterator i = c.filerevs.begin(), end = c.filerevs.end(); i != end; ++i) {
 						FileRev const& r = **i;
-						File    const& f = *r.file;
+						// Skip file revisions which get a fixup in the same changeset.
+						if (r.next && r.next->changeset == r.changeset) continue;
+
+						File const& f = *r.file;
 						if (r.state == STATE_DEAD) {
 							cout << "D " << f << '\n';
 						} else {
@@ -1178,10 +1208,13 @@ done_opt:
 					cout << "PROPS-END\n";
 
 					for (Vector<FileRev*>::const_iterator i = c.filerevs.begin(), end = c.filerevs.end(); i != end; ++i) {
-						FileRev const& r         = **i;
-						File    const& f         = *r.file;
-						bool    const  cur_dead  = r.state == STATE_DEAD;
-						bool    const  pred_dead = !r.pred || r.pred->state == STATE_DEAD;
+						FileRev const& r = **i;
+						// Skip file revisions which get a fixup in the same changeset.
+						if (r.next && r.next->changeset == r.changeset) continue;
+
+						File const& f         = *r.file;
+						bool const  cur_dead  = r.state == STATE_DEAD;
+						bool const  pred_dead = !r.pred || r.pred->state == STATE_DEAD;
 
 						if (pred_dead && !cur_dead) {
 							add_dir_entry(f.dir);
