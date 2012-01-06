@@ -1156,6 +1156,19 @@ do_insert:
 		Vector<Changeset const*>::const_iterator const end   = sorted.end();
 		for (Vector<Changeset const*>::const_iterator i = end; i != begin;) {
 			Changeset const& c = **--i;
+
+			/* Do not emit empty changesets.
+			 * Skip changesets, which only add files which are dead and were dead
+			 * before or did not exist. */
+			bool empty = true;
+			for (Vector<FileRev*>::const_iterator i = c.filerevs.begin(), end = c.filerevs.end(); i != end; ++i) {
+				FileRev const& r = **i;
+				if (r.state == STATE_DEAD && (!r.pred || r.pred->state == STATE_DEAD)) continue;
+				empty = false;
+				break;
+			}
+			if (empty) continue;
+
 			uptr<Blob> log(convert_log(*c.log));
 			switch (output_format) {
 				case OUT_GIT: {
