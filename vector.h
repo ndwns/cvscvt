@@ -14,6 +14,8 @@ public:
 
 	Vector() : capacity_(0), size_(0), data_(0) {}
 
+	Vector(size_t const n);
+
 	~Vector();
 
 	T&       operator [](size_t const i)       { assert(i < size_); return data_[i]; }
@@ -62,6 +64,14 @@ private:
 
 	template<typename U> friend void std::swap(Vector<U>&, Vector<U>&);
 };
+
+template<typename T> Vector<T>::Vector(size_t const n) :
+	capacity_(n), size_(n), data_(new T[n]())
+{
+	for (T* i = data_, * const end = data_ + n; i != end; ++i) {
+		new(i) T();
+	}
+}
 
 template<typename T> Vector<T>::~Vector()
 {

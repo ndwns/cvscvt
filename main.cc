@@ -4,6 +4,7 @@
 #include <iomanip>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 #include <unistd.h>
 
 #include <sys/types.h>
@@ -173,21 +174,28 @@ struct Directory
 		name(0),
 		parent(0),
 		depth(0),
-		n_entries(0)
+		id(next_id++)
 	{}
 
 	Directory(char const* const name, Directory* const parent) :
 		name(strdup(name)),
 		parent(parent),
 		depth(parent->depth + 1),
-		n_entries(0)
+		id(next_id++)
 	{}
 
-	char*      name;
-	Directory* parent;
-	size_t     depth;
-	size_t     n_entries;
+	static size_t n_dirs() { return next_id; }
+
+	char*            name;
+	Directory*       parent;
+	size_t           depth;
+	size_t     const id;
+
+private:
+	static size_t next_id;
 };
+
+size_t Directory::next_id = 0;
 
 static std::ostream& operator <<(std::ostream& o, Directory const& d)
 {
@@ -335,7 +343,9 @@ struct Changeset
 		newest(0, 1, 1, 0, 0, 0),
 #endif
 		filerevs(),
-		n_succ()
+		n_succ(),
+		id(),
+		mark()
 	{}
 
 	u4 hash() const { return log->hash() ^ author->hash(); }
@@ -361,6 +371,8 @@ struct Changeset
 #endif
 	Vector<FileRev*> filerevs;
 	size_t           n_succ;
+	size_t           id;
+	u4               mark;
 };
 
 static inline bool operator ==(Changeset const& a, Changeset const& b)
@@ -368,9 +380,27 @@ static inline bool operator ==(Changeset const& a, Changeset const& b)
 	return a.log == b.log && a.author == b.author;
 }
 
-static char const*     trunk_name = 0;
+struct Tag
+{
+	Tag(Symbol const name) : name(name), latest() {}
+
+	void add(FileRev* const r) { filerevs.push_back(r); }
+
+	u4 hash() const { return name->hash(); }
+
+	Symbol const     name;
+	Vector<FileRev*> filerevs;
+	Changeset const* latest;
+};
+
+static inline bool operator ==(Tag const& a, Tag const &b)
+{
+	return a.name == b.name;
+}
+
 static bool            verbose    = false;
 static Set<Changeset*> changesets;
+static Set<Tag*>       tags;
 static size_t          file_revs;
 static size_t          on_trunk;
 static size_t          n_files;
@@ -378,7 +408,7 @@ static bool            in_attic;
 
 static std::ostream& print_read_status()
 {
-	return cerr << CLEAR << n_files << " files, " << file_revs << " file revisions, " << on_trunk << " on trunk, " << changesets.size() << " changesets";
+	return cerr << CLEAR << n_files << " files, " << file_revs << " file revisions, " << on_trunk << " on trunk, " << changesets.size() << " changesets, " << tags.size() << " tags";
 }
 
 static void accept_newphrase(Lexer& l, Symbol const stop_at = 0)
@@ -442,9 +472,16 @@ static void read_file(FILE* const f, File* const file)
 	l.expect(T_SEMICOLON);
 
 	l.expect(Sym::symbols);
-	while (l.accept(T_ID)) {
+	while (Symbol const ssym = l.accept(T_ID)) {
 		l.expect(T_COLON);
-		l.expect(T_NUM);
+		Symbol const srev = l.expect(T_NUM);
+
+		RevNum const* const rev = RevNum::parse(srev);
+		if (rev->trunk()) {
+			FileRev* const filerev = revs.insert(new FileRev(file, rev));
+			Tag*     const tag     = tags.insert(new Tag(ssym));
+			tag->add(filerev);
+		}
 	}
 	l.expect(T_SEMICOLON);
 
@@ -660,20 +697,30 @@ static size_t log2(size_t const v)
 		10;
 }
 
-static void add_dir_entry(Directory* const d)
+static void add_dir_entry(char const* const prefix, Vector<size_t>& n_entries, Directory* const d)
 {
-	if (d && d->n_entries++ == 0) {
-		add_dir_entry(d->parent);
-		cout << "Node-path: " << trunk_name << '/' << *d << "\nNode-kind: dir\nNode-action: add\n\n";
+	if (d && n_entries[d->id]++ == 0) {
+		add_dir_entry(prefix, n_entries, d->parent);
+		cout << "Node-path: " << prefix << '/' << *d << "\nNode-kind: dir\nNode-action: add\n\n";
 	}
 }
 
-static void del_dir_entry(Directory* const d)
+static void del_dir_entry(char const* const prefix, Vector<size_t>& n_entries, Directory* const d)
 {
-	if (d && --d->n_entries == 0) {
-		cout << "Node-path: " << trunk_name << '/' << *d << "\nNode-kind: dir\nNode-action: delete\n\n";
-		del_dir_entry(d->parent);
+	if (d && --n_entries[d->id] == 0) {
+		cout << "Node-path: " << prefix << '/' << *d << "\nNode-kind: dir\nNode-action: delete\n\n";
+		del_dir_entry(prefix, n_entries, d->parent);
 	}
+}
+
+static bool older_tag(Tag const* const a, Tag const* const b)
+{
+	return b->latest->id < a->latest->id;
+}
+
+static bool tagged_rev_older(FileRev const* const a, FileRev const* const b)
+{
+	return b->changeset->id < a->changeset->id;
 }
 
 static bool is_cont_byte(u1 const c)
@@ -760,14 +807,54 @@ convert_byte:
 	}
 }
 
+static void emit_svn_revision(size_t const revno, Date const& date, u1 const* const author, size_t const author_len, u1 const* const log, size_t const log_len)
+{
+	size_t const prop_len =
+		(author ? 5 + 11 + 2 + log2(author_len) + 1 + author_len + 1 : 0) + // svn:author
+		4 +  9 + 5 + 28 +                                                   // svn:date
+		4 +  7 + 2 + log2(log_len) + 1 + log_len + 1 +                      // svn:log
+		11;                                                                 // PROPS-END
+	cout <<
+		"Revision-number: " << revno << "\n"
+		"Prop-content-length: " << prop_len << "\n"
+		"Content-length: " << prop_len << "\n"
+		"\n";
+	if (author) {
+		cout << "K 10\nsvn:author\nV "  << author_len << '\n';
+		cout.write(reinterpret_cast<char const*>(author), author_len);
+		cout << '\n';
+	}
+	using std::setw;
+	cout <<
+		"K 8\nsvn:date\nV 27\n" << std::setfill('0')
+		<< setw(4) << (u4)date.year   << '-'
+		<< setw(2) << (u4)date.month  << '-'
+		<< setw(2) << (u4)date.day    << 'T'
+		<< setw(2) << (u4)date.hour   << ':'
+		<< setw(2) << (u4)date.minute << ':'
+		<< setw(2) << (u4)date.second << ".000000Z\n"
+		"K 7\n"
+		"svn:log\n"
+		"V " << log_len << '\n';
+	cout.write(reinterpret_cast<char const*>(log), log_len);
+	cout <<
+		"\n"
+		"PROPS-END\n"
+		"\n";
+}
+
 int main(int argc, char** argv)
 try
 {
 	char const* email_domain    = 0;
 	u4          split_threshold = 5 * 60;
+	char const* tags_name       = 0;
+	char const* trunk_name      = 0;
 	for (;;) {
-		switch (getopt(argc, argv, "e:f:s:t:v")) {
+		switch (getopt(argc, argv, "T:e:f:s:t:v")) {
 			case -1: goto done_opt;
+
+			case 'T': trunk_name = check_trunk_name(optarg); break;
 
 			case 'e': email_domain = optarg; break;
 
@@ -806,7 +893,7 @@ try
 				break;
 			}
 
-			case 't': trunk_name = check_trunk_name(optarg); break;
+			case 't': tags_name = check_trunk_name(optarg); break;
 
 			case 'v': verbose = true; break;
 
@@ -822,6 +909,10 @@ done_opt:
 		case OUT_GIT:
 			if (!email_domain) email_domain = "invalid";
 			if (!trunk_name)   trunk_name   = "master";
+			if (tags_name) {
+				cerr << "error: -t is not valid for git output\n";
+				return EXIT_FAILURE;
+			}
 			break;
 
 		case OUT_SVN:
@@ -830,6 +921,7 @@ done_opt:
 				return EXIT_FAILURE;
 			}
 			if (!trunk_name) trunk_name = "trunk";
+			if (!tags_name)  tags_name  = "tags";
 			break;
 	}
 
@@ -859,8 +951,10 @@ done_opt:
 
 	u4 mark = 0;
 
+	Directory* const root = new Directory();
+
 	Indent     indent;
-	Directory* curdir = new Directory();
+	Directory* curdir = root;
 	while (FTSENT* const ent = fts_read(fts)) {
 		switch (ent->fts_info) {
 			case FTS_D: {
@@ -1066,7 +1160,7 @@ do_insert:
 		roots.push(c);
 	}
 
-	Vector<Changeset const*> sorted;
+	Vector<Changeset*> sorted_changesets;
 
 	{
 #if DEBUG_SPLIT
@@ -1074,10 +1168,12 @@ do_insert:
 #endif
 		size_t n = 0;
 		while (!roots.empty()) {
-			Changeset const& c = *roots.front();
+			Changeset& c = *roots.front();
 			roots.pop();
 
-			sorted.push_back(&c);
+			c.id = n;
+
+			sorted_changesets.push_back(&c);
 
 #if DEBUG_SPLIT
 			cerr << &c << ' ' << c.oldest << ' ' << c.newest << ' ' << *c.author << ' ' << c.filerevs.size() << endl;
@@ -1121,41 +1217,70 @@ do_insert:
 	}
 #endif
 
+	Vector<Tag*> sorted_tags;
+	for (Set<Tag*>::iterator it = tags.begin(), endt = tags.end(); it != endt; ++it) {
+		Tag&              t  = **it;
+		Vector<FileRev*>& fr = t.filerevs;
+
+		Changeset const* l = 0;
+		for (Vector<FileRev*>::iterator i = fr.begin(); i != fr.end();) {
+			FileRev*& r = *i;
+			if (!r->changeset) {
+				cerr << CLEAR "warning: tagged revision " << *r->rev << " of " << *r->file << " in tag " << *t.name << " does not exist\n";
+				goto skip_filerev;
+			} else if (r->state == STATE_DEAD) {
+				if (!l || l->id > r->changeset->id) l = r->changeset;
+skip_filerev:
+				r = fr.back();
+				fr.pop_back();
+			} else {
+				if (!l || l->id > r->changeset->id) l = r->changeset;
+				++i;
+			}
+		}
+
+		t.latest = l;
+
+		if (fr.empty()) {
+			cerr << CLEAR "note: tag " << *t.name << " is empty\n";
+		} else {
+			sorted_tags.push_back(&t);
+		}
+	}
+	std::sort(sorted_tags.begin(), sorted_tags.end(), older_tag);
+
 	{
-		using std::setw;
+		Vector<size_t> n_dir_entries(Directory::n_dirs());
 
 		if (output_format == OUT_SVN) {
 			cout << "SVN-fs-dump-format-version: 2\n\n";
 
-			Date const& d = (*sorted.begin())->oldest;
+			Date const& d = sorted_changesets.front()->oldest;
+			static u1 const log[] = "Standard project directories initialized by cvscvt.";
+			emit_svn_revision(1, d, 0, 0, log, sizeof(log) - 1);
 			cout <<
-				"Revision-number: 1\n"
-				"Prop-content-length: 125\n"
-				"Content-length: 125\n"
-				"\n"
-				"K 8\nsvn:date\nV 27\n" << std::setfill('0')
-					<< setw(4) << (u4)d.year   << '-'
-					<< setw(2) << (u4)d.month  << '-'
-					<< setw(2) << (u4)d.day    << 'T'
-					<< setw(2) << (u4)d.hour   << ':'
-					<< setw(2) << (u4)d.minute << ':'
-					<< setw(2) << (u4)d.second << ".000000Z\n"
-				"K 7\nsvn:log\nV 51\nStandard project directories initialized by cvscvt.\n"
-				"PROPS-END\n"
-				"\n"
 				"Node-path: " << trunk_name << "\n"
 				"Node-kind: dir\n"
 				"Node-action: add\n"
+				"\n"
+				"Node-path: " << tags_name << "\n"
+				"Node-kind: dir\n"
+				"Node-action: add\n"
 				"\n";
+			n_dir_entries[root->id] = 1;
 		}
 
 		u4 const date1970 = Date(1970, 1, 1, 0, 0, 0).seconds();
 		size_t n_commits = 0;
+		size_t n_tags    = 0;
 
-		Vector<Changeset const*>::const_iterator const begin = sorted.begin();
-		Vector<Changeset const*>::const_iterator const end   = sorted.end();
-		for (Vector<Changeset const*>::const_iterator i = end; i != begin;) {
-			Changeset const& c = **--i;
+		Vector<Tag*>::const_iterator             ti    = sorted_tags.begin();
+		Vector<Tag*>::const_iterator       const tend  = sorted_tags.end();
+		Changeset const*                         tnext = ti != tend ? (*ti)->latest : 0;
+		Vector<Changeset*>::const_iterator const begin = sorted_changesets.begin();
+		Vector<Changeset*>::const_iterator const end   = sorted_changesets.end();
+		for (Vector<Changeset*>::const_iterator i = end; i != begin;) {
+			Changeset& c = **--i;
 
 			/* Do not emit empty changesets.
 			 * Skip changesets, which only add files which are dead and were dead
@@ -1176,6 +1301,7 @@ do_insert:
 					cout << "# " << c.oldest << '\n';
 #endif
 					cout << "commit refs/heads/" << trunk_name << '\n';
+					cout << "mark :" << (c.mark = ++mark) << '\n';
 					cout << "committer " << *c.author << " <" << *c.author << "@" << email_domain << "> " << c.oldest.seconds() - date1970 << " +0000\n";
 					cout << "data " << log->size << '\n';
 					cout << *log << '\n';
@@ -1196,29 +1322,9 @@ do_insert:
 				}
 
 				case OUT_SVN: {
-					cout << "Revision-number: " << (n_commits + 2) << '\n';
-
-					Blob   const& a        = *c.author;
-					Date   const& d        = c.oldest;
-					Blob   const& l        = *log;
-					size_t const  prop_len =
-						5 + 11 + 2 + log2(a.size) + 1 + a.size + 1 + // svn:author
-						4 +  9 + 5 + 28 +                            // svn:date
-						4 +  7 + 2 + log2(l.size) + 1 + l.size + 1 + // svn:log
-						11;                                          // PROPS-END
-
-					cout << "Prop-content-length: " << prop_len << '\n';
-					cout << "Content-length: "      << prop_len << "\n\n";
-					cout << "K 10\nsvn:author\nV "  << a.size << '\n' << a << '\n';
-					cout << "K 8\nsvn:date\nV 27\n" << std::setfill('0')
-						<< setw(4) << (u4)d.year   << '-'
-						<< setw(2) << (u4)d.month  << '-'
-						<< setw(2) << (u4)d.day    << 'T'
-						<< setw(2) << (u4)d.hour   << ':'
-						<< setw(2) << (u4)d.minute << ':'
-						<< setw(2) << (u4)d.second << ".000000Z\n";
-					cout << "K 7\nsvn:log\nV " << l.size << '\n' << l << '\n';
-					cout << "PROPS-END\n";
+					Blob const& a = *c.author;
+					Blob const& l = *log;
+					emit_svn_revision(c.mark = n_commits + n_tags + 2, c.oldest, a.data, a.size, l.data, l.size);
 
 					for (Vector<FileRev*>::const_iterator i = c.filerevs.begin(), end = c.filerevs.end(); i != end; ++i) {
 						FileRev const& r = **i;
@@ -1230,7 +1336,7 @@ do_insert:
 						bool const  pred_dead = !r.pred || r.pred->state == STATE_DEAD;
 
 						if (pred_dead && !cur_dead) {
-							add_dir_entry(f.dir);
+							add_dir_entry(trunk_name, n_dir_entries, f.dir);
 						}
 
 						if (!cur_dead) {
@@ -1265,7 +1371,7 @@ do_insert:
 							cout << r.content;
 						} else if (!pred_dead) {
 							cout << "Node-path: " << trunk_name << '/' << f << "\nNode-action: delete\n\n";
-							del_dir_entry(f.dir);
+							del_dir_entry(trunk_name, n_dir_entries, f.dir);
 						}
 					}
 
@@ -1274,9 +1380,115 @@ do_insert:
 				}
 			}
 
-			if (++n_commits % 100 == 0) cerr << CLEAR "emitting changesets... " << n_commits << ' ' << c.oldest;
+			while (&c == tnext) {
+				Tag&              t  = **ti;
+				Vector<FileRev*>& fr = t.filerevs;
+
+				std::sort(fr.begin(), fr.end(), tagged_rev_older);
+
+				switch (output_format) {
+					case OUT_GIT: {
+						cout << "commit refs/tags/" << *t.name << '\n';
+						cout << "committer cvscvt <cvscvt@invalid> " << tnext->oldest.seconds() - date1970 << " +0000\n";
+						cout << "data 9\n";
+						cout << "Make tag\n\n";
+
+						FileRev const* min = fr.front();
+						FileRev const* max = fr.front()->next;
+						for (Vector<FileRev*>::const_iterator i = fr.begin(), end = fr.end(); i != end; ++i) {
+							FileRev const* const r = *i;
+							if (max && max->changeset->id >= r->changeset->id) {
+								cout << "merge :" << min->changeset->mark << '\n';
+								goto set_max_git;
+							} else if (!max || (r->next && max->changeset->id < r->next->changeset->id)) {
+set_max_git:
+								max = r->next;
+							}
+							min = r;
+						}
+						cout << "merge :" << min->changeset->mark << '\n';
+
+						cout << "deleteall\n";
+
+						for (Vector<FileRev*>::const_iterator i = fr.begin(), end = fr.end(); i != end; ++i) {
+							FileRev const&       r    = **i;
+							File    const&       f    = *r.file;
+							char    const* const mode = f.executable ? "100755" : "100644";
+							cout << "M " << mode << " :" << r.mark << ' ' << f << '\n';
+						}
+						break;
+					}
+
+					case OUT_SVN: {
+						std::string tag_path(tags_name);
+						tag_path += '/';
+						tag_path.append(reinterpret_cast<char const*>(t.name->data), t.name->size);
+
+						static u1 const log[] = "Make tag\n";
+						emit_svn_revision(n_commits + n_tags + 3, tnext->oldest, 0, 0, log, sizeof(log) - 1);
+
+						FileRev const*                   min      = fr.front();
+						FileRev const*                   max      = fr.front()->next;
+						Vector<size_t>                   n_tag_dir_entries(Directory::n_dirs());
+						Vector<FileRev*>::const_iterator next_out = fr.begin();
+						for (Vector<FileRev*>::const_iterator i = next_out, end = fr.end();; ++i) {
+							if (i == end) {
+								size_t const out_mark = min->changeset->mark;
+								for (; next_out != i; ++next_out) {
+									FileRev const& outr = **next_out;
+									File    const& outf = *outr.file;
+
+									add_dir_entry(tag_path.c_str(), n_tag_dir_entries, outf.dir);
+
+									cout <<
+										"Node-path: " << tag_path << '/' << outf << "\n"
+										"Node-kind: file\n"
+										"Node-action: add\n"
+										"Node-copyfrom-rev: " << out_mark << "\n"
+										"Node-copyfrom-path: " << trunk_name << '/' << outf << "\n\n";
+								}
+								break;
+							}
+
+							FileRev const* const r = *i;
+							if (max && max->changeset->id >= r->changeset->id) {
+								size_t const out_mark = min->changeset->mark;
+								for (; next_out != i; ++next_out) {
+									FileRev const& outr = **next_out;
+									File    const& outf = *outr.file;
+
+									add_dir_entry(tag_path.c_str(), n_tag_dir_entries, outf.dir);
+
+									cout <<
+										"Node-path: " << tag_path << '/' << outf << "\n"
+										"Node-kind: file\n"
+										"Node-action: add\n"
+										"Node-copyfrom-rev: " << out_mark << "\n"
+										"Node-copyfrom-path: " << trunk_name << '/' << outf << "\n\n";
+								}
+								goto set_max_svn;
+							} else if (!max || (r->next && max->changeset->id < r->next->changeset->id)) {
+set_max_svn:
+								max = r->next;
+							}
+							min = r;
+						}
+						cout << "merge :" << min->changeset->mark << '\n';
+						break;
+					}
+				}
+
+				++n_tags;
+				tnext = ++ti != tend ? (*ti)->latest : 0;
+			}
+
+			if (++n_commits % 100 == 0) cerr << CLEAR "emitting... " << n_commits << " commits, " << n_tags << " tags " << c.oldest;
 		}
-		cerr << CLEAR "emitting changesets... " << n_commits << '\n';
+		cerr << CLEAR "emitting... " << n_commits << " commits, " << n_tags << " tags\n";
+
+		if (output_format == OUT_GIT) {
+			cout << "done\n";
+		}
 	}
 
 	fts_close(fts);

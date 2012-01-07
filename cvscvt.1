@@ -8,7 +8,8 @@
 .Op Fl e Ar email\-domain
 .Op Fl f Cm git | Cm svn
 .Op Fl s Ar split\-threshold Ns Op Cm s Ns | Ns Cm m Ns | Ns Cm h Ns | Ns Cm d
-.Op Fl t Ar trunk\-name
+.Op Fl T Ar trunk\-name
+.Op Fl t Ar tags\-name
 .Op Fl v
 .Ar path ...
 .Sh DESCRIPTION
@@ -47,13 +48,18 @@ If no suffix is given, the threshold is interpreted as
 .Cm seconds.
 The default is
 .Cm 300\~seconds .
-.It Fl t Ar trunk\-name
+.It Fl T Ar trunk\-name
 Set the name for the trunk in the resulting dump.
 The default is
 .Cm master
 for git and
 .Cm trunk
 for svn.
+.It Fl t Ar tags\-name
+Set the base name for the tags in the resulting dump.
+This is only valid for svn output.
+The default is
+.Cm tags .
 .It Fl v
 Show more verbose progress information on stderr.
 .El
@@ -85,6 +91,6 @@ was written by
 .An Christoph Mallon
 .Aq christoph.mallon@gmx.de .
 .Sh BUGS
-No branches or tags are converted, only trunk.
+No branches or tags on branches are converted, only trunk and its tags.
 In particular vendor branches are not merged into trunk.
 This is work in progress.
