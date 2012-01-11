@@ -109,23 +109,16 @@ RevNum const* RevNum::parse(Symbol const s)
 
 		u4 major;
 		u4 minor;
-		if ('1' <= *i && *i <= '9') {
-			major = *i++ - '0';
-			for (;;) {
+		if ('0' <= *i && *i <= '9') {
+			major = 0;
+			do {
+				major = major * 10 + (*i++ - '0');
 				if (i == end) {
 					minor = major;
 					major = 0;
 					goto done;
 				}
-				if ('0' <= *i && *i <= '9') {
-					major = major * 10 + (*i++ - '0');
-				} else {
-					break;
-				}
-			}
-		} else if (*i++ == '0') {
-			major = 0;
-			if (i == end) goto invalid;
+			} while ('0' <= *i && *i <= '9');
 		} else {
 			goto invalid;
 		}
@@ -133,18 +126,11 @@ RevNum const* RevNum::parse(Symbol const s)
 		if (*i++ != '.') goto invalid;
 		if (i == end)    goto invalid;
 
-		if ('1' <= *i && *i <= '9') {
-			minor = *i++ - '0';
-			for (;;) {
-				if (i != end && '0' <= *i && *i <= '9') {
-					minor = minor * 10 + (*i++ - '0');
-				} else {
-					break;
-				}
-			}
-		} else if (*i++ == '0') {
+		if ('0' <= *i && *i <= '9') {
 			minor = 0;
-			if ('0' <= *i && *i <= '9') goto invalid;
+			do {
+				minor = minor * 10 + (*i++ - '0');
+			} while (i != end && '0' <= *i && *i <= '9');
 		} else {
 			goto invalid;
 		}
