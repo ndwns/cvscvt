@@ -143,6 +143,11 @@ Symbol Lexer::add_keyword(char const* const s)
 	return hash_find(Blob::alloc(s));
 }
 
+Symbol Lexer::add_symbol(Blob* const b)
+{
+	return hash_find(b);
+}
+
 Symbol Lexer::expect(Symbol const b)
 {
 	if (kind_ == T_ID && blob_ == b) {

@@ -62,6 +62,13 @@ namespace Sym
 	static Symbol strict;
 	static Symbol symbols;
 	static Symbol text;
+
+	static Symbol b;
+	static Symbol k;
+	static Symbol kv;
+	static Symbol kvl;
+	static Symbol o;
+	static Symbol v;
 }
 
 #undef major
@@ -384,13 +391,14 @@ static inline bool operator ==(Tag const& a, Tag const &b)
 	return a.name == b.name;
 }
 
-static bool            verbose    = false;
-static Set<Changeset*> changesets;
-static Set<Tag*>       tags;
-static size_t          file_revs;
-static size_t          on_trunk;
-static size_t          n_files;
-static bool            in_attic;
+static Vector<char const*> expand_keywords;
+static bool                verbose         = false;
+static Set<Changeset*>     changesets;
+static Set<Tag*>           tags;
+static size_t              file_revs;
+static size_t              on_trunk;
+static size_t              n_files;
+static bool                in_attic;
 
 static std::ostream& print_read_status()
 {
@@ -405,6 +413,49 @@ static void accept_newphrase(Lexer& l, Symbol const stop_at = 0)
 		while (l.accept(T_ID) || l.accept(T_NUM) || l.accept(T_STRING) || l.accept(T_COLON)) {}
 		l.expect(T_SEMICOLON);
 	}
+}
+
+static Blob* unexpand(Symbol const src)
+{
+	BlobBuilder dst;
+	for (u1 const* si = src->begin(), * const send = src->end(); si != send;) {
+		dst.add_byte(*si);
+
+		if (*si++ == '$') {
+			u1 const* sk = si;
+
+			for (;; ++sk) {
+				if (sk == send) goto no_keyword;
+				u1 const c = *sk;
+				if (!between('A', c, 'Z') && !between('a', c, 'z')) break;
+			}
+
+			u1 const* const colon = sk;
+			if (sk == send || *sk++ != ':') goto no_keyword;
+
+			do {
+				if (sk == send) goto no_keyword;
+				if (*sk == '\n') goto no_keyword;
+			} while (*sk++ != '$');
+
+			for (Vector<char const*>::const_iterator vi = expand_keywords.begin(), vend = expand_keywords.end(); vi != vend; ++vi) {
+				u1   const* sm = si;
+				char const* k  = *vi;
+				for (; *sm == (u1)*k; ++sm, ++k) {}
+
+				if (*k == '\0' && sm == colon) {
+					while (si != colon) {
+						dst.add_byte((u1)*si++);
+					}
+					dst.add_byte('$');
+					si = sk;
+					break;
+				}
+			}
+		}
+no_keyword:;
+	}
+	return dst.get();
 }
 
 static void read_file(FILE* const f, File* const file)
@@ -486,8 +537,14 @@ static void read_file(FILE* const f, File* const file)
 		l.expect(T_SEMICOLON);
 	}
 
+	bool binary = false;
 	if (l.accept(Sym::expand)) {
-		l.accept(T_STRING);
+		Symbol const expand = l.accept(T_STRING);
+		if (expand == Sym::b || expand == Sym::o) {
+			binary = true;
+		} else if (expand && expand != Sym::k && expand != Sym::k && expand != Sym::kv && expand != Sym::kvl && expand != Sym::v) {
+			cerr << CLEAR "error: invalid substitution mode '" << *expand << "' in " << *file << "; ignoring\n";
+		}
 		l.expect(T_SEMICOLON);
 	}
 
@@ -570,7 +627,8 @@ static void read_file(FILE* const f, File* const file)
 		Symbol const slog = l.expect(T_STRING);
 
 		accept_newphrase(l, Sym::text);
-		Symbol const stext = l.expect(T_STRING);
+		Symbol stext = l.expect(T_STRING);
+		if (!binary) stext = l.add_symbol(unexpand(stext));
 
 		RevNum const* const rev = RevNum::parse(srev);
 		if (rev->trunk()) {
@@ -629,11 +687,6 @@ static bool older_filerev(FileRev const* const a, FileRev const* const b)
 	} else {
 		return a->date < b->date;
 	}
-}
-
-static bool between(char const min, char const c, char const max)
-{
-	return min <= c && c <= max;
 }
 
 static char const* check_trunk_name(char const* const name)
@@ -832,13 +885,16 @@ static void emit_svn_revision(size_t const revno, Date const& date, u1 const* co
 int main(int argc, char** argv)
 try
 {
-	char const* email_domain    = 0;
-	u4          split_threshold = 5 * 60;
-	char const* tags_name       = 0;
-	char const* trunk_name      = 0;
+	char const* email_domain     = 0;
+	u4          split_threshold  = 5 * 60;
+	char const* tags_name        = 0;
+	char const* trunk_name       = 0;
+	bool        unexpand_default = true;
 	for (;;) {
-		switch (getopt(argc, argv, "T:e:f:s:t:v")) {
+		switch (getopt(argc, argv, "KT:e:f:k:s:t:v")) {
 			case -1: goto done_opt;
+
+			case 'K': unexpand_default = false; break;
 
 			case 'T': trunk_name = check_trunk_name(optarg); break;
 
@@ -853,6 +909,10 @@ try
 					cerr << "error: unknown output format '" << optarg << "'\n";
 					return EXIT_FAILURE;
 				}
+				break;
+
+			case 'k':
+				expand_keywords.push_back(optarg);
 				break;
 
 			case 's': {
@@ -890,6 +950,20 @@ done_opt:
 
 	argc -= optind;
 	argv += optind;
+
+	if (unexpand_default) {
+		expand_keywords.push_back("Author");
+		expand_keywords.push_back("Date");
+		expand_keywords.push_back("Header");
+		expand_keywords.push_back("Id");
+		expand_keywords.push_back("Locker");
+		expand_keywords.push_back("Log");
+		expand_keywords.push_back("Name");
+		expand_keywords.push_back("RCSfile");
+		expand_keywords.push_back("Revision");
+		expand_keywords.push_back("Source");
+		expand_keywords.push_back("State");
+	}
 
 	switch (output_format) {
 		case OUT_GIT:
@@ -931,6 +1005,13 @@ done_opt:
 	Sym::strict   = Lexer::add_keyword("strict");
 	Sym::symbols  = Lexer::add_keyword("symbols");
 	Sym::text     = Lexer::add_keyword("text");
+
+	Sym::b   = Lexer::add_keyword("b");
+	Sym::k   = Lexer::add_keyword("k");
+	Sym::kv  = Lexer::add_keyword("kv");
+	Sym::kvl = Lexer::add_keyword("kvl");
+	Sym::o   = Lexer::add_keyword("o");
+	Sym::v   = Lexer::add_keyword("v");
 
 	FTS* const fts = fts_open(argv, FTS_PHYSICAL, compar);
 	if (!fts) throw std::runtime_error("fts_open failed");

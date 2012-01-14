@@ -1,4 +1,4 @@
-.Dd December 19, 2011
+.Dd January 14, 2012
 .Dt CVSCVT 1
 .Sh NAME
 .Nm cvscvt
@@ -7,6 +7,8 @@
 .Nm
 .Op Fl e Ar email\-domain
 .Op Fl f Cm git | Cm svn
+.Op Fl K
+.Op Fl k Ar keyword
 .Op Fl s Ar split\-threshold Ns Op Cm s Ns | Ns Cm m Ns | Ns Cm h Ns | Ns Cm d
 .Op Fl T Ar trunk\-name
 .Op Fl t Ar tags\-name
@@ -35,6 +37,26 @@ The default is
 Select the dump output format.
 The default is
 .Cm git .
+.It Fl K
+Do not unexpand the default RCS keywords
+.Cm Author ,
+.Cm Date ,
+.Cm Header ,
+.Cm Id ,
+.Cm Locker ,
+.Cm Log ,
+.Cm Name ,
+.Cm RCSfile ,
+.Cm Revision ,
+.Cm Source
+and
+.Cm State .
+.It Fl k Ar keyword
+Unexpand the given keyword.
+No unexpansion is performed on files with the substition modes
+.Cm b
+and
+.Cm o .
 .It Fl s Ar split\-threshold Ns Op Cm s Ns | Ns Cm m Ns | Ns Cm h Ns | Ns Cm d
 If a potential change set contains a gap longer than this threshold between two consecutive time stamps, then the change set is split at this point.
 An optional suffix for

@@ -28,6 +28,7 @@ public:
 	Lexer(FILE*);
 
 	static Symbol add_keyword(char const*);
+	static Symbol add_symbol(Blob*);
 
 	void next();
 
